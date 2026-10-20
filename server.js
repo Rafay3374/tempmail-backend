@@ -5,39 +5,53 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(express.json({ limit: '20mb' }));
 app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Test route (ye check karne ke liye hai ki server chal raha hai ya nahi)
-app.get('/', (req, res) => {
-    res.send('Temp Mail Backend is running successfully!');
-});
+// Temporary storage for incoming emails (In-memory array for now)
+let inboxEmails = [];
 
-// Postmark Inbound Webhook Endpoint
+// 1. Webhook endpoint for Postmark Inbound Stream
 app.post('/api/inbound-email', (req, res) => {
-    const emailData = req.body;
+    try {
+        const emailData = req.body;
+        
+        console.log("=== NEW EMAIL RECEIVED ===");
+        console.log("From:", emailData.From);
+        console.log("To:", emailData.To);
+        console.log("Subject:", emailData.Subject);
+        console.log("Text Body:", emailData.TextBody);
 
-    // Postmark se aane wala data extract kar rahe hain
-    const sender = emailData.From;       // Jisne email bheji
-    const recipient = emailData.To;     // Jis temp address par aayi (e.g., xyz@adscameo.com)
-    const subject = emailData.Subject;   // Email ka subject
-    const textBody = emailData.TextBody; // Email ka text message
+        // Save email to our temporary array
+        inboxEmails.push({
+            from: emailData.From,
+            to: emailData.To,
+            subject: emailData.Subject || "No Subject",
+            body: emailData.TextBody || emailData.HtmlBody || "",
+            date: new Date()
+        });
 
-    console.log("----------------------------------------");
-    console.log(`New Email Received!`);
-    console.log(`To: ${recipient}`);
-    console.log(`From: ${sender}`);
-    console.log(`Subject: ${subject}`);
-    console.log(`Message: ${textBody}`);
-    console.log("----------------------------------------");
-
-    // Yahan aap is email ko database (jaise MongoDB/Redis) mein save karenge
-    // Aur WebSocket (Socket.io) ke zariye frontend par bhej denge.
-
-    res.status(200).send({ status: 'Success', message: 'Email processed successfully' });
+        // Postmark requires a 200 OK response to confirm receipt
+        return res.status(200).json({ success: true, message: "Email processed successfully" });
+    } catch (error) {
+        console.error("Error processing inbound email:", error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
 });
 
-// Server start karna
+// 2. API endpoint for Frontend to fetch received emails for a specific address
+app.get('/api/emails/:emailAddress', (req, res) => {
+    const targetEmail = req.params.emailAddress.toLowerCase();
+    const userEmails = inboxEmails.filter(mail => mail.to.toLowerCase() === targetEmail);
+    res.status(200).json(userEmails);
+});
+
+// Root test route
+app.get('/', (req, res) => {
+    res.send("Temp Mail Backend is running live!");
+});
+
 app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });
